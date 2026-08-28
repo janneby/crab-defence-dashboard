@@ -1,15 +1,35 @@
 # Crab Defence Dashboard
 
-Desktop administration tool for the **Crab Defence** production Firebase Realtime Database — browse, edit, and back up live game data from a secure Electron app. Internal admin tooling for Landcrab Interactive.
+Desktop administration tool for the **Crab Defence** production Firebase Realtime Database — browse, edit, and back up live game data from a secure Electron app. Internal tooling by Landcrab Interactive.
 
 ## Features
 
 - **Live RTDB access** via Firebase Admin SDK (service account, full admin privileges)
 - **Recursive tree navigator** — expand/collapse through `playerStats`, `balanceDebug`, `adWatchLedger`, `purchaseLedger`, `adBannerLedger` and any nested node
 - **Matrix table editor** — inline double-click cell editing with automatic type coercion (number / boolean / string / JSON object)
-- **Full database export** — one-click dump to timestamped local JSON backups
 - **Player ID search** — locate a specific player node instantly
+- **Full database export** — one-click dump to timestamped local JSON backups
+- **Live status log** — footer streams Firebase init, loads, saves, guard rejections, and backup writes in real time
 - **Dark theme** — `#0b0c10` base, `#66fcf1` cyan accents
+
+## Quick start
+
+**Requirements:** Node.js v20+ (tested on v22) · Windows 10/11 for the bundled launcher (`npm start` works cross-platform) · a Firebase service account JSON with RTDB admin access for the Crab Defence project.
+
+```bat
+npm install
+```
+
+1. Place the service account key in the git-ignored `.hermes/` directory — the expected filename is defined as `SERVICE_ACCOUNT_FILE` in `src/main.js`. If it's missing, the app logs a clear startup error instead of guessing.
+2. Launch:
+
+   ```bat
+   start.bat
+   ```
+
+   or from any platform: `npx electron .` / `npm start`
+
+> **Never commit credentials.** The `.hermes/` directory and all backup dumps are covered by `.gitignore`.
 
 ## Safety Guardrails
 
@@ -20,36 +40,6 @@ Desktop administration tool for the **Crab Defence** production Firebase Realtim
 | Protected node: `purchaseLedger` | All mutation under this directory (update, add, delete) is hard-blocked in the main process — purchase records can never be edited or removed through the UI |
 | Destructive confirmations | Deleting a node always requires an explicit confirmation dialog showing the exact path |
 | Crash isolation | Every IPC handler runs inside an isolated `try/catch` wrapper — no single failure can lock up or crash the app |
-
-## Requirements
-
-- **Node.js v20+** (tested on v22)
-- **Windows 10/11** launcher provided; `npx electron .` / `npm start` work cross-platform
-- A Firebase service account JSON with RTDB admin access for the Crab Defence project
-
-## Setup
-
-```bat
-npm install
-```
-
-The app reads its Firebase service account from disk at startup — place the key file inside the git-ignored `.hermes/` directory (the exact expected filename is defined as `SERVICE_ACCOUNT_FILE` in `src/main.js`). If the file is missing, the app logs a clear startup error instead of guessing.
-
-> **Never commit credentials.** The `.hermes/` directory and all backup dumps are covered by `.gitignore`.
-
-## Run
-
-```bat
-start.bat
-```
-
-or:
-
-```bash
-npx electron .
-# or
-npm start
-```
 
 ## Architecture
 
@@ -71,7 +61,3 @@ Full production dumps are written to `.backups/` (git-ignored):
 ```
 
 Backups are created on demand via the **Backup DB** button — run one manually before any bulk operation.
-
-## Status Footer
-
-The footer log streams real-time events: Firebase init, node loads, saves (with type coercion), rejections by the safety guards, and backup writes.
