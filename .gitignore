@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Firebase secrets & credentials — NEVER commit
+.hermes/
+firebase-service-account*.json
+firebase.json.bak
+**/serviceAccount*.json
+
+# RTDB operation backups (pre-mutation dumps contain live player data)
+.backups/
+BACKUP_*.json
+*.backup.json
+
+# Build / packaging output
+dist/
+out/
+release/
+*.asar
+
+# Logs & crash dumps
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+electron-log*.json*
+
+# Environment files
+.env
+.env.*
+*.local
+
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/

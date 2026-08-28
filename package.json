@@ -1,0 +1,16 @@
+{
+  "name": "crab-defence-dashboard",
+  "productName": "Crab Defence Dashboard",
+  "version": "1.0.0",
+  "description": "Desktop administration dashboard for the Crab Defence production Realtime Database (Electron + Firebase Admin SDK).",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0"
+  }
+}

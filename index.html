@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>Crab Defence Dashboard</title>
+  <style>
+    :root {
+      --bg: #0b0c10;
+      --panel: #111523;
+      --panel-2: #161b2a;
+      --border: #1f2637;
+      --accent: #66fcf1;
+      --accent-dim: rgba(102, 252, 241, 0.14);
+      --text: #c9d3e3;
+      --muted: #5b6577;
+      --danger: #ff5470;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+      font-size: 13px; display: flex; flex-direction: column;
+    }
+
+    /* ---------- Header ---------- */
+    #app-header {
+      height: 52px; flex: 0 0 auto; display: flex; align-items: center; gap: 14px;
+      padding: 0 18px; background: var(--panel); border-bottom: 1px solid var(--border);
+    }
+    #app-header .brand { font-size: 16px; font-weight: 700; letter-spacing: 0.4px; white-space: nowrap; }
+    #app-header .brand .crab { margin-right: 8px; }
+    #app-header .brand .accent { color: var(--accent); }
+    .header-actions { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+    .btn {
+      background: var(--panel-2); color: var(--text); border: 1px solid #2a3348;
+      padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 12.5px;
+      transition: all 0.15s ease; white-space: nowrap;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+    .btn.danger { border-color: rgba(255, 84, 112, 0.5); color: var(--danger); }
+    .btn.danger:hover { background: rgba(255, 84, 112, 0.12); border-color: var(--danger); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ---------- Body split ---------- */
+    #app-body { flex: 1; display: flex; min-height: 0; }
+
+    /* ---------- Sidebar ---------- */
+    #sidebar {
+      width: 290px; flex: 0 0 auto; background: var(--panel);
+      border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0;
+    }
+    #sidebar .side-head { padding: 12px 14px 8px; font-size: 11px; letter-spacing: 1.4px; color: var(--muted); text-transform: uppercase; }
+    #tree-filter {
+      margin: 0 14px 10px; padding: 7px 10px; width: calc(100% - 28px);
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); outline: none; font-size: 12.5px;
+    }
+    #tree-filter:focus { border-color: var(--accent); }
+    #tree-container { flex: 1; overflow-y: auto; padding-bottom: 14px; }
+
+    .tree-row { display: flex; align-items: center; cursor: pointer; user-select: none; border-radius: 5px; }
+    .tree-row:hover { background: rgba(255, 255, 255, 0.04); }
+    .tree-row.selected { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
+    .tree-caret { width: 16px; flex: 0 0 auto; text-align: center; color: var(--muted); font-size: 10px; transition: transform 0.12s ease; }
+    .tree-caret.open { transform: rotate(90deg); }
+    .tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+    .tree-badges { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
+    .badge { font-size: 10px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); padding: 1px 6px; border-radius: 8px; }
+    .tree-children { overflow: hidden; }
+
+    /* ---------- Main panel ---------- */
+    #main-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    #path-bar {
+      height: 42px; flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 0 16px;
+      background: var(--panel); border-bottom: 1px solid var(--border); font-family: 'Cascadia Code', Consolas, monospace; font-size: 12.5px;
+    }
+    #path-bar .crumb { color: var(--muted); }
+    #path-bar .crumb.active { color: var(--accent); cursor: pointer; }
+    #path-bar .crumb.active:hover { text-decoration: underline; }
+    #path-bar .spacer { flex: 1; }
+    #matrix-wrap { flex: 1; overflow: auto; padding: 16px; min-height: 0; }
+    #welcome { color: var(--muted); font-size: 14px; line-height: 2; padding: 30px 8px; }
+    #welcome b { color: var(--accent); font-weight: 600; }
+
+    table#matrix-table { width: 100%; border-collapse: collapse; }
+    #matrix-table th {
+      text-align: left; font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
+      padding: 9px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 1;
+    }
+    #matrix-table td { padding: 8px 14px; border-bottom: 1px solid rgba(31, 38, 55, 0.6); vertical-align: top; }
+    #matrix-table tr:hover td { background: rgba(255, 255, 255, 0.025); }
+    td.m-key { font-family: 'Cascadia Code', Consolas, monospace; color: var(--accent); white-space: nowrap; width: 38%; }
+    td.m-val { cursor: cell; font-family: 'Cascadia Code', Consolas, monospace; word-break: break-all; }
+    td.m-val:hover { background: var(--accent-dim); }
+    td.m-type { color: var(--muted); font-size: 11px; white-space: nowrap; width: 90px; text-transform: uppercase; }
+    .val-str { color: #ffd76e; }
+    .val-num { color: #82aaff; }
+    .val-bool { color: var(--accent); font-weight: 600; }
+    .val-null { color: var(--muted); font-style: italic; }
+    .val-obj { color: #c792ea; }
+    td.editing { cursor: default; }
+    .cell-input, .cell-textarea {
+      width: 100%; background: var(--panel-2); border: 1px solid var(--accent); border-radius: 4px;
+      color: var(--text); font-family: inherit; font-size: 12.5px; padding: 6px 8px; outline: none; resize: vertical;
+    }
+
+    /* ---------- Footer status log ---------- */
+    #status-footer {
+      flex: 0 0 auto; border-top: 1px solid var(--border); background: var(--panel);
+      display: flex; align-items: stretch;
+    }
+    #conn-pill {
+      display: flex; align-items: center; gap: 8px; padding: 0 16px; font-size: 12px; white-space: nowrap;
+      border-right: 1px solid var(--border);
+    }
+    #conn-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); transition: background 0.2s; }
+    #conn-dot.ok { background: var(--accent); box-shadow: 0 0 8px rgba(102, 252, 241, 0.7); }
+    #log-console { flex: 1; overflow-y: auto; max-height: 96px; padding: 6px 14px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 11.5px; line-height: 1.7; }
+    #log-console .log-line { white-space: pre-wrap; word-break: break-all; }
+    #log-console .t-info { color: var(--muted); }
+    #log-console .t-ok { color: var(--accent); }
+    #log-console .t-err { color: var(--danger); }
+    #log-console .t-warn { color: #ffd76e; }
+
+    /* ---------- Modal ---------- */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(5, 6, 10, 0.72); display: none;
+      align-items: center; justify-content: center; z-index: 100;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal-box {
+      background: var(--panel); border: 1px solid #2a3348; border-radius: 10px; padding: 26px 28px;
+      width: 460px; max-width: 90vw; box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+    }
+    .modal-box h3 { font-size: 15px; margin-bottom: 12px; color: var(--text); }
+    .modal-box p { line-height: 1.7; color: var(--muted); margin-bottom: 6px; word-break: break-all; }
+    .modal-box .mono { font-family: 'Cascadia Code', Consolas, monospace; color: var(--accent); }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+    /* ---------- Scrollbars ---------- */
+    ::-webkit-scrollbar { width: 9px; height: 9px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #232b3d; border-radius: 5px; }
+    ::-webkit-scrollbar-thumb:hover { background: #2f3a52; }
+  </style>
+</head>
+<body>
+  <header id="app-header">
+    <div class="brand"><span class="crab">🦀</span><span class="accent">CRAB DEFENCE</span>&nbsp;DASHBOARD</div>
+    <div class="header-actions">
+      <button id="btn-refresh" class="btn">⟳ Refresh</button>
+      <button id="btn-backup" class="btn primary">⬇ Backup Full DB</button>
+      <button id="btn-exit" class="btn danger">Exit</button>
+    </div>
+  </header>
+
+  <div id="app-body">
+    <aside id="sidebar">
+      <div class="side-head">Database Explorer</div>
+      <input id="tree-filter" type="text" placeholder="Filter tree…" autocomplete="off" spellcheck="false" />
+      <div id="tree-container"></div>
+    </aside>
+
+    <main id="main-panel">
+      <div id="path-bar"><span class="crumb">/</span></div>
+      <div id="matrix-wrap">
+        <div id="welcome">
+          Select a node in the explorer to inspect it, or start from the root.<br />
+          Double-click any value cell to edit inline — numbers, booleans and strings are coerced automatically on save.<br />
+          Use <b>+ Add Property</b> to append a new key, or <b>Delete Node</b> to remove the selected branch (root is protected).
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer id="status-footer">
+    <div id="conn-pill"><span id="conn-dot"></span><span id="conn-label">CONNECTING…</span></div>
+    <div id="log-console"></div>
+  </footer>
+
+  <!-- Delete confirmation modal -->
+  <div id="modal-delete" class="modal-overlay">
+    <div class="modal-box">
+      <h3>Delete Node</h3>
+      <p>You are about to permanently delete the following branch from the <b style="color:var(--accent)">live production</b> database:</p>
+      <p><span class="mono" id="modal-delete-path"></span></p>
+      <p style="font-size:11.5px">This action cannot be undone. A pre-mutation backup is recommended.</p>
+      <div class="modal-actions">
+        <button id="btn-modal-cancel" class="btn">Cancel</button>
+        <button id="btn-modal-confirm" class="btn danger">Delete Forever</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add property modal -->
+  <div id="modal-add" class="modal-overlay">
+    <div class="modal-box">
+      <h3>Add Property</h3>
+      <p>New key under: <span class="mono" id="modal-add-parent"></span></p>
+      <input id="add-key-input" class="cell-input" type="text" placeholder="Key name" style="margin-bottom:10px" autocomplete="off" spellcheck="false" />
+      <textarea id="add-value-input" class="cell-textarea" rows="4" placeholder='Value (number / true|false / "string")'></textarea>
+      <div class="modal-actions">
+        <button id="btn-add-cancel" class="btn">Cancel</button>
+        <button id="btn-add-confirm" class="btn primary">Add Property</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
