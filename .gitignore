@@ -17,6 +17,13 @@ dist/
 out/
 release/
 *.asar
+*.exe
+
+# Electron packaging
+*.zip
+
+# AI agent analysis reports — not source code
+.deepseek/
 
 # Logs & crash dumps
 logs/

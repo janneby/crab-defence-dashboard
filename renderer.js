@@ -103,6 +103,95 @@ function displayValue(v) {
   return String(v);
 }
 
+// --- Smart tree filter — expands & highlights playerId matches -----------------
+let filterTimeout = null;
+
+async function applyFilter() {
+  const q = (elFilter.value || '').trim();
+  if (!q) {
+    // Clear filter: show all nodes, remove highlights
+    for (const node of elTree.querySelectorAll('.tree-node')) {
+      const row = node.querySelector(':scope > .tree-row');
+      if (!row) continue;
+      row.style.display = '';
+      row.classList.remove('highlight-match');
+    }
+    return;
+  }
+
+  // Debounce: wait for user to stop typing
+  if (filterTimeout) clearTimeout(filterTimeout);
+  filterTimeout = setTimeout(async () => {
+    await expandAllAndFilter(q);
+  }, 300);
+}
+
+async function expandAllAndFilter(query) {
+  const matches = []; // { path, key }
+
+  // Step 1: Expand all nodes so every row is in the DOM
+  for (const node of elTree.querySelectorAll('.tree-node')) {
+    const fullPath = node.dataset.path;
+    if (!expandedPaths.has(fullPath)) {
+      await expandNodeRecursive(fullPath);
+    }
+  }
+
+  // Step 2: Search all visible rows for query match
+  for (const node of elTree.querySelectorAll('.tree-node')) {
+    const row = node.querySelector(':scope > .tree-row');
+    if (!row) continue;
+    const label = row.querySelector('.tree-label').textContent;
+    const keyMatch = label.includes(query); // case-sensitive for playerId
+
+    if (keyMatch) {
+      matches.push({ path: node.dataset.path, row });
+      row.classList.add('highlight-match');
+      row.style.display = '';
+    } else {
+      row.style.display = 'none';
+    }
+  }
+
+  // Step 3: Scroll to first match and log results
+  if (matches.length > 0) {
+    log(`Found ${matches.length} match(es) for "${query}"`, 'ok');
+    const firstMatch = matches[0];
+    firstMatch.row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Auto-select the first match to show player details
+    selectPath(firstMatch.path);
+  } else {
+    log(`No matches for "${query}"`, 'warn');
+  }
+}
+
+async function expandNodeRecursive(fullPath) {
+  if (!fullPath) return; // root is always visible
+  if (expandedPaths.has(fullPath)) return;
+
+  try {
+    const res = await api.fetchNodeChildren(fullPath);
+    if (res && res.success) {
+      treeDataCache.set(fullPath, res.data);
+      expandedPaths.add(fullPath);
+
+      // Render children into DOM
+      const nodeEl = elTree.querySelector(`.tree-node[data-path="${cssEscape(fullPath)}"]`);
+      if (nodeEl) {
+        const box = nodeEl.querySelector(':scope > .tree-children');
+        const data = res.data;
+        if (isObject(data)) {
+          const frag = document.createDocumentFragment();
+          for (const k of Object.keys(data).sort()) {
+            frag.appendChild(makeTreeRow(k, data[k], joinPath(fullPath, k), depthOf(fullPath) + 1));
+          }
+          box.appendChild(frag);
+        }
+      }
+    }
+  } catch (_) { /* expansion failed — node stays collapsed */ }
+}
+
 // --- Tree rendering --------------------------------------------------------
 function iconFor(key) {
   if (/player|stats|user|profile/i.test(key)) return '👤';

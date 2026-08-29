@@ -132,34 +132,29 @@ safeHandle('delete-node', async (targetPath) => {
 safeHandle('search-player-id', async (playerId) => {
   const id = String(playerId || '').trim();
   if (!id) return { success: false, error: 'Empty player ID.' };
+
+  // Läs endast rot-noderna — playerId finns alltid på nivå 1.
   const snap = await requireDb().ref().once('value');
   const root = snap.val() || {};
   const results = [];
+
   for (const topKey of Object.keys(root)) {
     const topVal = root[topKey];
+    // Om rot-nodens namn själv matchar playerId (sällsynt men möjligt).
     if (topKey === id) {
       results.push({ path: topKey, matchType: 'node-key', childCount: countChildren(topVal) });
       continue;
     }
-    if (!topVal || typeof topVal !== 'object') continue;
-    for (const k1 of Object.keys(topVal)) {
-      const v1 = topVal[k1];
-      if (k1 === id) {
-        results.push({ path: `${topKey}/${k1}`, matchType: 'node-key', childCount: countChildren(v1) });
-      } else if (v1 && typeof v1 === 'object') {
-        for (const k2 of Object.keys(v1)) {
-          const v2 = v1[k2];
-          if (k2 === id) {
-            results.push({ path: `${topKey}/${k1}/${k2}`, matchType: 'node-key', childCount: countChildren(v2) });
-          } else if (v2 && typeof v2 === 'object') {
-            for (const k3 of Object.keys(v2)) {
-              if (k3 === id) results.push({ path: `${topKey}/${k1}/${k2}/${k3}`, matchType: 'node-key', childCount: countChildren(v2[k3]) });
-            }
-          }
+    // Om nodens direkt-barn är ett objekt, kolla om någon nyckel matchar playerId.
+    if (topVal && typeof topVal === 'object') {
+      for (const k1 of Object.keys(topVal)) {
+        if (k1 === id) {
+          results.push({ path: `${topKey}/${k1}`, matchType: 'node-key', childCount: countChildren(topVal[k1]) });
         }
       }
     }
   }
+
   return { success: true, playerId: id, results };
 });
 
