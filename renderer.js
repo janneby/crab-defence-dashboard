@@ -24,6 +24,21 @@ const btnBackup = document.getElementById('btn-backup');
 const btnExit = document.getElementById('btn-exit');
 const modalDelete = document.getElementById('modal-delete');
 const modalAdd = document.getElementById('modal-add');
+const elClock = document.getElementById('clock');
+
+// --- Clock updater -------------------------------------------------------
+let clockInterval = null;
+function startClock() {
+  if (clockInterval) clearInterval(clockInterval);
+  function tick() {
+    const d = new Date();
+    const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    elClock.textContent = `${dateStr}  ${timeStr}`;
+  }
+  tick();
+  clockInterval = setInterval(tick, 1000);
+}
 
 // --- Logging & connection status ----------------------------------------
 function log(message, type) {
@@ -581,6 +596,7 @@ elFilter.addEventListener('input', applyFilter);
 (async function init() {
   try {
     log('Crab Defence Dashboard starting …', 'info');
+    startClock();
     await rebuildTree();
     selectPath('');
   } catch (err) {
