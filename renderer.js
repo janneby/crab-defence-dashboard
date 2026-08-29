@@ -4,6 +4,8 @@ let selectedPath = '';            // '' = database root. Path of node shown in m
 const expandedPaths = new Set();  // full paths currently expanded in the sidebar tree.
 const treeDataCache = new Map();  // path -> raw node payload (from fetch-node-children).
 let activePlayerId = null;        // reserved: focused player ID for search/delete flows.
+let currentFilterQuery = '';      // current filter query (set by applyFilter)
+let pendingDeletePaths = [];      // paths to delete when "Delete All Matches" is confirmed
 let currentLoadedPath = null;     // last path successfully loaded into the matrix panel.
 let isEditingCell = false;        // true while an inline cell editor is open.
 // ------------------------------------------------------------------------
@@ -108,48 +110,130 @@ let filterTimeout = null;
 
 async function applyFilter() {
   const q = (elFilter.value || '').trim();
+  currentFilterQuery = q;
+
   if (!q) {
-    // Clear filter: show all nodes, remove highlights
-    for (const node of elTree.querySelectorAll('.tree-node')) {
-      const row = node.querySelector(':scope > .tree-row');
-      if (!row) continue;
-      row.style.display = '';
-      row.classList.remove('highlight-match');
+    // Clear filter: only rebuild if we're actually in filtered mode
+    if (expandedPaths.size === 0 || elTree.children.length === 0) return;
+    // Check if tree is in filtered state (has highlight-match nodes)
+    const hasHighlights = elTree.querySelector('.highlight-match');
+    if (!hasHighlights) {
+      // Tree is already clean, just update button visibility
+      renderPathBar();
+      return;
     }
+    // Rebuild tree to show all nodes
+    elTree.innerHTML = '';
+    expandedPaths.clear();
+    treeDataCache.clear();
+    await rebuildTree();
+    log(`applyFilter: cleared and rebuilt`, 'info');
     return;
   }
 
   // Debounce: wait for user to stop typing
   if (filterTimeout) clearTimeout(filterTimeout);
   filterTimeout = setTimeout(async () => {
-    await expandAllAndFilter(q);
+    try {
+      log(`applyFilter: starting expandAllAndFilter`, 'info');
+      await expandAllAndFilter(q);
+      log(`applyFilter: finished`, 'info');
+    } catch (err) {
+      log(`applyFilter error: ${err.message}`, 'err');
+      console.error(err);
+    }
   }, 300);
 }
 
 async function expandAllAndFilter(query) {
-  const matches = []; // { path, key }
+  const matches = []; // { path, row }
 
-  // Step 1: Expand all nodes so every row is in the DOM
-  for (const node of elTree.querySelectorAll('.tree-node')) {
-    const fullPath = node.dataset.path;
-    if (!expandedPaths.has(fullPath)) {
-      await expandNodeRecursive(fullPath);
-    }
+  if (!query) {
+    // Clear filter: rebuild tree to show all nodes
+    elTree.innerHTML = '';
+    expandedPaths.clear();
+    treeDataCache.clear();
+    await rebuildTree();
+    return;
   }
 
-  // Step 2: Search all visible rows for query match
+  log(`Searching for "${query}"...`, 'info');
+
+  // Step 1: Build DOM tree — show ALL root keys, but only matching children
+  elTree.innerHTML = '';
+  expandedPaths.clear();
+
+  // Add root row
+  const rootRow = document.createElement('div');
+  rootRow.className = 'tree-row';
+  rootRow.style.paddingLeft = '8px';
+  rootRow.dataset.path = '';
+  const rl = document.createElement('span');
+  rl.className = 'tree-label';
+  rl.textContent = '🗄 / (root)';
+  rootRow.appendChild(rl);
+  elTree.appendChild(rootRow);
+  log(`Added root row`, 'info');
+
+  // Fetch all root keys and render them
+  try {
+    const rootRes = await api.fetchNodeChildren('');
+    log(`Root fetch result: ${JSON.stringify({success: rootRes?.success, hasData: !!rootRes?.data})}`, 'info');
+    if (!rootRes || !rootRes.success || !isObject(rootRes.data)) {
+      log(`No root data returned`, 'warn');
+      return;
+    }
+    const rootData = rootRes.data;
+    log(`Root keys: ${Object.keys(rootData).join(', ')}`, 'info');
+
+    for (const rootKey of Object.keys(rootData).sort()) {
+      const rootPath = rootKey;
+      const rootNodeEl = makeTreeRow(rootKey, rootData[rootKey], rootPath, 1);
+      elTree.appendChild(rootNodeEl);
+      log(`Added root key: ${rootKey}`, 'info');
+
+      // Mark as expanded and show children box
+      expandedPaths.add(rootPath);
+      const box = rootNodeEl.querySelector(':scope > .tree-children');
+      if (box) box.style.display = 'block';
+
+      // Fetch children of this root key
+      try {
+        const childRes = await api.fetchNodeChildren(rootPath);
+        log(`Child fetch for ${rootKey}: ${JSON.stringify({success: childRes?.success, hasData: !!childRes?.data})}`, 'info');
+        if (!childRes || !childRes.success || !isObject(childRes.data)) continue;
+        const childData = childRes.data;
+
+        // Only render children that match the query
+        for (const childKey of Object.keys(childData).sort()) {
+          if (childKey.includes(query)) {
+            const childPath = joinPath(rootPath, childKey);
+            const childNodeEl = makeTreeRow(childKey, childData[childKey], childPath, 2);
+            box.appendChild(childNodeEl);
+            matches.push({ path: childPath, row: childNodeEl.querySelector(':scope > .tree-row') });
+            log(`Added match: ${childPath}`, 'ok');
+          }
+        }
+      } catch (err) {
+        log(`Failed to fetch children of ${rootKey}: ${err.message}`, 'err');
+      }
+    }
+  } catch (err) {
+    log(`Failed to fetch root keys: ${err.message}`, 'err');
+    return;
+  }
+
+  // Step 2: Highlight matches only — show ALL nodes (parents + children)
   for (const node of elTree.querySelectorAll('.tree-node')) {
     const row = node.querySelector(':scope > .tree-row');
     if (!row) continue;
     const label = row.querySelector('.tree-label').textContent;
-    const keyMatch = label.includes(query); // case-sensitive for playerId
+    const isMatch = label.includes(query); // case-sensitive for playerId
 
-    if (keyMatch) {
-      matches.push({ path: node.dataset.path, row });
+    if (isMatch) {
       row.classList.add('highlight-match');
-      row.style.display = '';
     } else {
-      row.style.display = 'none';
+      row.classList.remove('highlight-match');
     }
   }
 
@@ -163,32 +247,90 @@ async function expandAllAndFilter(query) {
   } else {
     log(`No matches for "${query}"`, 'warn');
   }
+
+  // Step 4: Update path bar to show/hide Delete All Matches button
+  renderPathBar();
+}
+
+// Recursively search RTDB — return array of { fullPath, parentPath } for each playerId match
+async function searchTreeRecursively(path, query) {
+  const results = []; // { fullPath, parentPath }
+
+  try {
+    const res = await api.fetchNodeChildren(path);
+    if (!res || !res.success) return results;
+    const data = res.data;
+    if (!isObject(data)) return results;
+
+    for (const k of Object.keys(data).sort()) {
+      const childPath = joinPath(path, k);
+      const label = k; // key name is the label
+
+      if (label.includes(query)) {
+        // This is a playerId match — record it and stop recursing deeper
+        results.push({ fullPath: childPath, parentPath: path });
+      } else {
+        // Not a match — recurse deeper to find matches inside
+        const subResults = await searchTreeRecursively(childPath, query);
+        results.push(...subResults);
+      }
+    }
+  } catch (_) { /* search failed at this level */ }
+
+  return results;
+}
+
+// Build the DOM tree for a single match path — create nodes only for parent paths
+async function buildPathToNode(fullPath, query, renderedPaths) {
+  log(`Building path: ${fullPath}`, 'info');
+  // Split path into segments and build tree step by step
+  const segments = fullPath.split('/').filter(Boolean);
+  let currentPath = '';
+
+  for (let i = 0; i < segments.length; i++) {
+    currentPath = i === 0 ? segments[i] : joinPath(currentPath, segments[i]);
+    if (renderedPaths.has(currentPath)) continue;
+    renderedPaths.add(currentPath);
+
+    // Find parent element
+    const parentPath = i === 0 ? '' : currentPath.substring(0, currentPath.lastIndexOf('/'));
+    let parentNodeEl = parentPath ? elTree.querySelector(`.tree-node[data-path="${cssEscape(parentPath)}"]`) : null;
+    let targetBox = parentNodeEl ? parentNodeEl.querySelector(':scope > .tree-children') : elTree;
+
+    // Fetch data for this node if not already cached
+    let childNodeEl = null;
+    try {
+      const res = await api.fetchNodeChildren(parentPath);
+      const parentData = res && res.success ? res.data : {};
+      const key = segments[i];
+      const value = isObject(parentData) ? parentData[key] : null;
+
+      // Create the node element
+      childNodeEl = makeTreeRow(key, value, currentPath, i + 1);
+      targetBox.appendChild(childNodeEl);
+    } catch (err) {
+      log(`Failed to build node ${currentPath}: ${err.message}`, 'err');
+    }
+
+    // Mark as expanded and show children box (if it has children)
+    if (childNodeEl) {
+      expandedPaths.add(currentPath);
+      const box = childNodeEl.querySelector(':scope > .tree-children');
+      if (box) box.style.display = 'block';
+    }
+  }
 }
 
 async function expandNodeRecursive(fullPath) {
   if (!fullPath) return; // root is always visible
   if (expandedPaths.has(fullPath)) return;
 
-  try {
-    const res = await api.fetchNodeChildren(fullPath);
-    if (res && res.success) {
-      treeDataCache.set(fullPath, res.data);
-      expandedPaths.add(fullPath);
+  const nodeEl = elTree.querySelector(`.tree-node[data-path="${cssEscape(fullPath)}"]`);
+  if (!nodeEl) return;
 
-      // Render children into DOM
-      const nodeEl = elTree.querySelector(`.tree-node[data-path="${cssEscape(fullPath)}"]`);
-      if (nodeEl) {
-        const box = nodeEl.querySelector(':scope > .tree-children');
-        const data = res.data;
-        if (isObject(data)) {
-          const frag = document.createDocumentFragment();
-          for (const k of Object.keys(data).sort()) {
-            frag.appendChild(makeTreeRow(k, data[k], joinPath(fullPath, k), depthOf(fullPath) + 1));
-          }
-          box.appendChild(frag);
-        }
-      }
-    }
+  try {
+    await renderChildrenInto(nodeEl, fullPath);
+    expandedPaths.add(fullPath);
   } catch (_) { /* expansion failed — node stays collapsed */ }
 }
 
@@ -316,16 +458,6 @@ async function toggleExpand(fullPath, hasChildren) {
   }
 }
 
-function applyFilter() {
-  const q = (elFilter.value || '').trim().toLowerCase();
-  for (const node of elTree.querySelectorAll('.tree-node')) {
-    const row = node.querySelector(':scope > .tree-row');
-    if (!row) continue;
-    const label = row.querySelector('.tree-label').textContent.toLowerCase();
-    row.style.display = !q || label.includes(q) ? '' : 'none';
-  }
-}
-
 async function rebuildTree() {
   try {
     elTree.innerHTML = '';
@@ -396,15 +528,33 @@ function renderPathBar() {
     add.className = 'btn';
     add.textContent = '+ Add Property';
     add.disabled = selectedPath === '';
-    add.addEventListener('click', openAddModal);
+    add.addEventListener('click', () => {
+      log(`Button - Add Property pressed`, 'info');
+      openAddModal();
+    });
     elPathBar.appendChild(add);
     const del = document.createElement('button');
     del.id = 'btn-delete-node';
     del.className = 'btn danger';
     del.textContent = '🗑 Delete Node';
     del.disabled = selectedPath === '';
-    del.addEventListener('click', openDeleteModal);
+    del.addEventListener('click', () => {
+      log(`Button - Delete Node pressed (selectedPath="${selectedPath}")`, 'info');
+      openDeleteModal();
+    });
     elPathBar.appendChild(del);
+
+    // Delete All Matches button — only visible when filter is active
+    const delAll = document.createElement('button');
+    delAll.id = 'btn-delete-all-matches';
+    delAll.className = 'btn danger';
+    delAll.textContent = '🗑 Delete All Matches';
+    delAll.style.display = currentFilterQuery ? '' : 'none';
+    delAll.addEventListener('click', () => {
+      log(`Button - Delete All Matches pressed (currentFilterQuery="${currentFilterQuery}")`, 'info');
+      openDeleteAllMatchesModal();
+    });
+    elPathBar.appendChild(delAll);
   } catch (err) {
     log(`Path bar render error: ${err.message}`, 'err');
   }
@@ -582,28 +732,113 @@ function closeModals() {
     modalDelete.classList.remove('visible');
     modalAdd.classList.remove('visible');
     pendingDeletePath = null;
+    pendingDeletePaths = [];
   } catch (_) { /* noop */ }
 }
 
 async function confirmDelete() {
-  const p = pendingDeletePath;
+  // Check which mode we're in and save data BEFORE clearing state
+  const isDeleteAll = pendingDeletePaths && pendingDeletePaths.length > 0;
+  const savedDeletePaths = isDeleteAll ? [...pendingDeletePaths] : null;
+  const singlePath = !isDeleteAll ? pendingDeletePath : null;
+
   closeModals();
-  if (!p || !assertTargetPath(p)) return;
-  try {
-    log(`Deleting node /${p} …`, 'warn');
-    const res = await api.deleteNode(p);
-    if (res && res.success) {
-      log(`Deleted /${p}.`, 'ok');
-      expandedPaths.delete(p);
-      for (const ep of Array.from(expandedPaths)) if (ep.startsWith(p + '/')) expandedPaths.delete(ep);
-      if (selectedPath === p || selectedPath.startsWith(p + '/')) selectedPath = '';
-      await refreshAfterMutation();
-    } else {
-      log(`Delete rejected: ${(res && res.error) || 'unknown error'}`, 'err');
+
+  if (isDeleteAll) {
+    await confirmDeleteAll(savedDeletePaths);
+  } else if (!singlePath || !assertTargetPath(singlePath)) {
+    return;
+  } else {
+    const p = singlePath;
+    try {
+      log(`Deleting node /${p} …`, 'warn');
+      const res = await api.deleteNode(p);
+      if (res && res.success) {
+        log(`Deleted /${p}.`, 'ok');
+        expandedPaths.delete(p);
+        for (const ep of Array.from(expandedPaths)) if (ep.startsWith(p + '/')) expandedPaths.delete(ep);
+        if (selectedPath === p || selectedPath.startsWith(p + '/')) selectedPath = '';
+        await refreshAfterMutation();
+      } else {
+        log(`Delete rejected: ${(res && res.error) || 'unknown error'}`, 'err');
+      }
+    } catch (err) {
+      log(`Delete failed: ${err.message}`, 'err');
     }
-  } catch (err) {
-    log(`Delete failed: ${err.message}`, 'err');
   }
+}
+
+// Delete All Matches — delete all playerId matches from current filter query
+function openDeleteAllMatchesModal() {
+  try {
+    if (!currentFilterQuery) return;
+    // Collect all matching paths from the tree
+    pendingDeletePaths = [];
+    const allNodes = elTree.querySelectorAll('.tree-node');
+    for (const node of allNodes) {
+      const row = node.querySelector(':scope > .tree-row');
+      if (!row) continue;
+      const label = row.querySelector('.tree-label').textContent;
+      if (label.includes(currentFilterQuery)) {
+        pendingDeletePaths.push(node.dataset.path);
+      }
+    }
+    if (pendingDeletePaths.length === 0) {
+      log('No matches found to delete', 'warn');
+      return;
+    }
+    document.getElementById('modal-delete-title').textContent = `Delete ${pendingDeletePaths.length} Match(es)`;
+    document.getElementById('modal-delete-path').textContent =
+      pendingDeletePaths.join(', ');
+    modalDelete.classList.add('visible');
+  } catch (err) {
+    log(`Delete All Matches modal error: ${err.message}`, 'err');
+  }
+}
+
+async function confirmDeleteAll(savedPaths) {
+  if (!savedPaths || savedPaths.length === 0) return;
+  const count = savedPaths.length;
+  let successCount = 0;
+  let failCount = 0;
+
+  log(`=== Starting batch delete: ${count} match(es) ===`, 'warn');
+
+  for (let i = 0; i < savedPaths.length; i++) {
+    const p = savedPaths[i];
+    const parts = p.split('/');
+    const parentKey = parts[0] || '(root)';
+    const playerId = parts[1] || '(unknown)';
+
+    log(`[${i + 1}/${count}] Deleting ${parentKey}/${playerId} …`, 'warn');
+
+    try {
+      const res = await api.deleteNode(p);
+      if (res && res.success) {
+        log(`✅ Successfully deleted: userId "${playerId}" in ${parentKey}`, 'ok');
+        expandedPaths.delete(p);
+        for (const ep of Array.from(expandedPaths)) {
+          if (ep.startsWith(p + '/')) expandedPaths.delete(ep);
+        }
+        if (selectedPath === p || selectedPath.startsWith(p + '/')) selectedPath = '';
+        successCount++;
+      } else {
+        const errMsg = res && res.error ? res.error : 'unknown error';
+        log(`❌ Delete rejected for ${parentKey}/${playerId}: ${errMsg}`, 'err');
+        failCount++;
+      }
+    } catch (err) {
+      log(`❌ Delete failed for ${parentKey}/${playerId}: ${err.message}`, 'err');
+      failCount++;
+    }
+
+    if (i < savedPaths.length - 1) {
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
+  await refreshAfterMutation();
+  log(`=== Batch complete: ${successCount} succeeded, ${failCount} failed out of ${count} ===`, successCount === count ? 'ok' : 'warn');
 }
 
 function openAddModal() {
@@ -675,8 +910,20 @@ async function doRefresh() {
 btnRefresh.addEventListener('click', doRefresh);
 btnBackup.addEventListener('click', doBackup);
 btnExit.addEventListener('click', () => { try { window.firebaseApi.exitApp(); } catch (e) { log(e.message, 'err'); } });
-document.getElementById('btn-modal-cancel').addEventListener('click', closeModals);
-document.getElementById('btn-modal-confirm').addEventListener('click', confirmDelete);
+document.getElementById('btn-modal-cancel').addEventListener('click', () => {
+  log(`Button - Modal Cancel pressed`, 'info');
+  closeModals();
+});
+document.getElementById('btn-modal-confirm').addEventListener('click', async () => {
+  log(`Button - Modal Confirm (Delete Forever) pressed`, 'info');
+  try {
+    await confirmDelete();
+    log(`confirmDelete completed`, 'ok');
+  } catch (err) {
+    log(`confirmDelete error: ${err.message}`, 'err');
+    console.error(err);
+  }
+});
 document.getElementById('btn-add-cancel').addEventListener('click', closeModals);
 document.getElementById('btn-add-confirm').addEventListener('click', confirmAdd);
 elFilter.addEventListener('input', applyFilter);
