@@ -69,6 +69,8 @@
     .tree-row { display: flex; align-items: center; cursor: pointer; user-select: none; border-radius: 5px; }
     .tree-row:hover { background: rgba(255, 255, 255, 0.04); }
     .tree-row.selected { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
+    .tree-row.highlight-match { background: rgba(102, 252, 241, 0.2); box-shadow: inset 3px 0 0 var(--accent); }
+    .tree-node:not(:has(.highlight-match)) .tree-row { opacity: 0.3; }
     .tree-caret { width: 16px; flex: 0 0 auto; text-align: center; color: var(--muted); font-size: 10px; transition: transform 0.12s ease; }
     .tree-caret.open { transform: rotate(90deg); }
     .tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }

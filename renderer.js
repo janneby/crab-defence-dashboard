@@ -169,26 +169,12 @@ async function expandNodeRecursive(fullPath) {
   if (!fullPath) return; // root is always visible
   if (expandedPaths.has(fullPath)) return;
 
-  try {
-    const res = await api.fetchNodeChildren(fullPath);
-    if (res && res.success) {
-      treeDataCache.set(fullPath, res.data);
-      expandedPaths.add(fullPath);
+  const nodeEl = elTree.querySelector(`.tree-node[data-path="${cssEscape(fullPath)}"]`);
+  if (!nodeEl) return;
 
-      // Render children into DOM
-      const nodeEl = elTree.querySelector(`.tree-node[data-path="${cssEscape(fullPath)}"]`);
-      if (nodeEl) {
-        const box = nodeEl.querySelector(':scope > .tree-children');
-        const data = res.data;
-        if (isObject(data)) {
-          const frag = document.createDocumentFragment();
-          for (const k of Object.keys(data).sort()) {
-            frag.appendChild(makeTreeRow(k, data[k], joinPath(fullPath, k), depthOf(fullPath) + 1));
-          }
-          box.appendChild(frag);
-        }
-      }
-    }
+  try {
+    await renderChildrenInto(nodeEl, fullPath);
+    expandedPaths.add(fullPath);
   } catch (_) { /* expansion failed — node stays collapsed */ }
 }
 
@@ -313,16 +299,6 @@ async function toggleExpand(fullPath, hasChildren) {
     caret.classList.add('open');
     box.style.display = 'block';
     if (!box.hasChildNodes()) await renderChildrenInto(nodeEl, fullPath);
-  }
-}
-
-function applyFilter() {
-  const q = (elFilter.value || '').trim().toLowerCase();
-  for (const node of elTree.querySelectorAll('.tree-node')) {
-    const row = node.querySelector(':scope > .tree-row');
-    if (!row) continue;
-    const label = row.querySelector('.tree-label').textContent.toLowerCase();
-    row.style.display = !q || label.includes(q) ? '' : 'none';
   }
 }
 
